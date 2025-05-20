@@ -1,9 +1,10 @@
 # DERPShare
-A simple Proof-Of-Concept server for sharing DERP servers among multiple tailnets.
+A simple Proof-Of-Concept server for sharing DERP servers among multiple tailnets.    
+Thanks to tailscale/safesocket, Linux, Windows and Darwin are supported.
 
 ## Usage
 
-To begin with, your DERP node _must_ support the `--verify-server-url` option, which can be checked in derpers' help message. (`-h` option)  
+To begin with, your DERP node _must_ support the `--verify-client-url` option, which can be checked in derpers' help message. (`-h` option)  
 
 Once `share.go` is built and ran at first time, a configuration named `config.json` will be automatically generated.
 ```json
@@ -15,7 +16,8 @@ Once `share.go` is built and ran at first time, a configuration named `config.js
   ]
 }
 ```
-Usually, you don't need to modify the `unixSockAddr` option. The default one should be usable on most Linux distros. If not, you can find the correct one by using `systemctl status tailscaled` which will show tailscaled's cli options.
+Usually, you don't need to modify the `unixSockAddr` option. The default one should be usable on Windows and most Linux distros.
+(for some distros, like synology) If not, you can find the correct one by [checking tailscale's source](https://github.com/tailscale/tailscale/blob/3cc80cce6ac045c64a410ae19d86d8100b567a26/paths/paths.go#L23)
 
 Then, (re)start your DERP server with these options:
 ```

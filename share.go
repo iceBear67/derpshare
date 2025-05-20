@@ -12,7 +12,9 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"runtime"
 	"strings"
+	"tailscale.com/safesocket"
 )
 
 type Config struct {
@@ -42,7 +44,7 @@ func main() {
 	}
 	config := &Config{
 		ListenAddr:   "127.0.0.1:8081",
-		UnixSockAddr: "/var/run/tailscale/tailscaled.sock",
+		UnixSockAddr: DefaultTailscaledSocket(),
 		TrustSources: []string{"http://local-tailscaled.sock/localapi/v0/whois?addr={nodekey}"},
 	}
 	loadConfig(config, *flagConfig)
@@ -50,7 +52,7 @@ func main() {
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, network string, addr string) (net.Conn, error) {
 				if strings.HasPrefix(addr, "local-tailscaled.sock:") {
-					return net.Dial("unix", config.UnixSockAddr)
+					return safesocket.ConnectContext(ctx, config.UnixSockAddr)
 				}
 				return net.Dial(network, addr)
 			},
@@ -132,4 +134,24 @@ func loadConfig(config *Config, path string) {
 	if err = json.Unmarshal(configContent, config); err != nil {
 		log.Fatal("Cannot parse config: ", err)
 	}
+}
+
+// Taken from https://github.com/tailscale/tailscale/blob/main/paths/paths.go#L23
+// BSD-3 License
+// DefaultTailscaledSocket returns the path to the tailscaled Unix socket
+// or the empty string if there's no reasonable default.
+func DefaultTailscaledSocket() string {
+	if runtime.GOOS == "windows" {
+		return `\\.\pipe\ProtectedPrefix\Administrators\Tailscale\tailscaled`
+	}
+	if runtime.GOOS == "darwin" {
+		return "/var/run/tailscaled.socket"
+	}
+	if runtime.GOOS == "plan9" {
+		return "/srv/tailscaled.sock"
+	}
+	if fi, err := os.Stat("/var/run"); err == nil && fi.IsDir() {
+		return "/var/run/tailscale/tailscaled.sock"
+	}
+	return "tailscaled.sock"
 }

@@ -7,8 +7,15 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"runtime"
 	"strings"
+	"tailscale.com/safesocket"
 )
+
+type Exposer struct {
+	client *http.Client
+}
 
 // I encountered some error when building, so I decided to duplicate some logics from share.go
 // to make them independent.
@@ -23,13 +30,15 @@ func main() {
 		flag.Usage()
 		return
 	}
-	_client := &http.Client{
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, network string, addr string) (net.Conn, error) {
-				if strings.HasPrefix(addr, "local-tailscaled.sock:") {
-					return net.Dial("unix", *socketAddr)
-				}
-				return net.Dial(network, addr)
+	exposer := &Exposer{
+		client: &http.Client{
+			Transport: &http.Transport{
+				DialContext: func(ctx context.Context, network string, addr string) (net.Conn, error) {
+					if strings.HasPrefix(addr, "local-tailscaled.sock:") {
+						return safesocket.ConnectContext(ctx, *socketAddr)
+					}
+					return net.Dial(network, addr)
+				},
 			},
 		},
 	}
@@ -53,7 +62,7 @@ func main() {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		if _checkNodeKey(_client, nodeKey) {
+		if exposer.checkNodeKey(nodeKey) {
 			log.Printf("Access granted for %s", nodeKey)
 			w.WriteHeader(http.StatusOK)
 			return
@@ -68,7 +77,7 @@ func main() {
 	}
 }
 
-func _checkNodeKey(_client *http.Client, nodekey string) bool {
+func (e *Exposer) checkNodeKey(nodekey string) bool {
 	u, _ := url.Parse("http://local-tailscaled.sock/localapi/v0/whois?addr=" + url.QueryEscape(nodekey))
 	request := http.Request{
 		Method: "GET",
@@ -78,6 +87,26 @@ func _checkNodeKey(_client *http.Client, nodekey string) bool {
 		URL: u,
 	}
 	request.Host = "local-tailscaled.sock"
-	resp, err := _client.Do(&request)
+	resp, err := e.client.Do(&request)
 	return err == nil && resp.StatusCode == 200
+}
+
+// Taken from https://github.com/tailscale/tailscale/blob/main/paths/paths.go#L23
+// BSD-3 License
+// DefaultTailscaledSocket returns the path to the tailscaled Unix socket
+// or the empty string if there's no reasonable default.
+func (e *Exposer) DefaultTailscaledSocket() string {
+	if runtime.GOOS == "windows" {
+		return `\\.\pipe\ProtectedPrefix\Administrators\Tailscale\tailscaled`
+	}
+	if runtime.GOOS == "darwin" {
+		return "/var/run/tailscaled.socket"
+	}
+	if runtime.GOOS == "plan9" {
+		return "/srv/tailscaled.sock"
+	}
+	if fi, err := os.Stat("/var/run"); err == nil && fi.IsDir() {
+		return "/var/run/tailscale/tailscaled.sock"
+	}
+	return "tailscaled.sock"
 }
